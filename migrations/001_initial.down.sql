@@ -1,0 +1,13 @@
+DROP TABLE audit_events;
+DROP TABLE file_transfers;
+DROP TABLE control_leases;
+DROP TABLE remote_sessions;
+DROP TABLE test_authorizations;
+DROP TABLE admin_device_grants;
+DROP TABLE pairing_tokens;
+DROP TABLE devices;
+DROP TABLE device_groups;
+DROP TABLE admin_sessions;
+DROP TABLE administrator_roles;
+DROP TABLE roles;
+DROP TABLE administrators;

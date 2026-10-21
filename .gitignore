@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.user
+*.suo
+bin/
+obj/
+.vs/
+.idea/
+.DS_Store
+artifacts/
+TestResults/
+.tools/

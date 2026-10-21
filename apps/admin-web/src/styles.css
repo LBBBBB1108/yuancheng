@@ -1,0 +1,61 @@
+:root {
+  color: #18231f;
+  background: #eef1e8;
+  font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input { font: inherit; }
+
+.shell {
+  width: min(1120px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 48px 0 80px;
+}
+
+.masthead, .panel-heading, .device-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+h1, h2, p { margin-top: 0; }
+h1 { margin-bottom: 0; font-size: clamp(30px, 4vw, 48px); letter-spacing: -.04em; }
+h2 { margin-bottom: 12px; font-size: 28px; }
+.eyebrow, .section-kicker { color: #406551; font-size: 12px; font-weight: 800; letter-spacing: .16em; }
+.environment { border: 1px solid #adc1b2; border-radius: 999px; padding: 8px 14px; color: #315b45; }
+
+.login-card, .device-panel {
+  margin-top: 64px;
+  border: 1px solid #d2d8cc;
+  border-radius: 24px;
+  background: rgba(255, 255, 252, .9);
+  box-shadow: 0 24px 70px rgba(45, 60, 50, .12);
+}
+
+.login-card { display: grid; grid-template-columns: 1.1fr .9fr; gap: 56px; padding: 52px; }
+.supporting-copy, .device-list span { color: #657168; line-height: 1.7; }
+form { display: grid; gap: 18px; }
+label { display: grid; gap: 8px; font-weight: 700; }
+input { width: 100%; border: 1px solid #bdc9bf; border-radius: 10px; background: #fff; padding: 12px 14px; }
+input:focus { outline: 3px solid rgba(55, 114, 80, .18); border-color: #377250; }
+button { border: 0; border-radius: 10px; padding: 13px 18px; color: white; background: #214f38; font-weight: 800; cursor: pointer; }
+button:disabled { cursor: wait; opacity: .6; }
+.error { margin: 0; color: #a42b25; }
+
+.device-panel { padding: 36px; }
+.device-list { list-style: none; margin: 28px 0 0; padding: 0; }
+.device-list li { border-top: 1px solid #e0e4dc; padding: 20px 0; }
+.device-list li div { display: grid; gap: 5px; }
+.online { color: #176c3b !important; }
+.offline { color: #7a7f7b !important; }
+.empty-state { margin: 28px 0 0; padding: 32px; border-radius: 14px; background: #f2f4ef; color: #657168; }
+
+@media (max-width: 760px) {
+  .shell { width: min(100% - 24px, 1120px); padding-top: 24px; }
+  .masthead { align-items: flex-start; }
+  .login-card { grid-template-columns: 1fr; gap: 28px; margin-top: 36px; padding: 28px; }
+}

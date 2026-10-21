@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/apps/" />
+  <Folder Name="/apps/agent-windows/" />
+  <Folder Name="/apps/agent-windows/src/">
+    <Project Path="apps/agent-windows/src/Yuancheng.Agent.Core/Yuancheng.Agent.Core.csproj" />
+    <Project Path="apps/agent-windows/src/Yuancheng.Agent/Yuancheng.Agent.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Agent.Core.Tests/Agent.Core.Tests.csproj" />
+  </Folder>
+</Solution>
