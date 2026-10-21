@@ -1,0 +1,4 @@
+interface:
+  display_name: "远程协助项目开启"
+  short_description: "恢复远程协助项目进度、Git 状态和下一步工作位置"
+  default_prompt: "使用 $yuancheng-project-open 恢复远程协助项目状态，中文汇报后等待任务。"

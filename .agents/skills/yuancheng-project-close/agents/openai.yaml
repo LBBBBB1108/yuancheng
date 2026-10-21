@@ -1,0 +1,4 @@
+interface:
+  display_name: "远程协助项目收尾"
+  short_description: "验证成果、更新状态并安全完成远程协助项目收尾"
+  default_prompt: "使用 $yuancheng-project-close 对远程协助项目执行中文收尾并汇报实际结果。"
