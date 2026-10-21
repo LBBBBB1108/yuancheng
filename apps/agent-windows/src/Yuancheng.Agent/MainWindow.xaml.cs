@@ -1,4 +1,7 @@
 using System.IO;
+using System.Net.Http;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -15,6 +18,14 @@ public partial class MainWindow : Window
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Yuancheng");
     private bool _localAssistanceEnabled = true;
+    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(15) };
+    private readonly DeviceConnectionClient _connectionClient = new();
+    private readonly ReconnectBackoff _reconnectBackoff = new(
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(30));
+    private CancellationTokenSource? _connectionCancellation;
+    private Task? _connectionTask;
+    private AgentBootstrapResult? _bootstrap;
 
     public MainWindow()
     {
@@ -27,6 +38,8 @@ public partial class MainWindow : Window
 #endif
         LoadSavedWelcomeImage();
         SetStatus("正在连接", "#9A7440");
+        Loaded += MainWindow_Loaded;
+        Closed += MainWindow_Closed;
     }
 
     private void ChooseImage_Click(object sender, RoutedEventArgs e)
@@ -56,14 +69,24 @@ public partial class MainWindow : Window
         }
     }
 
-    private void StopAssistance_Click(object sender, RoutedEventArgs e)
+    private async void StopAssistance_Click(object sender, RoutedEventArgs e)
     {
-        if (!_localAssistanceEnabled)
+        if (_localAssistanceEnabled)
         {
+            _localAssistanceEnabled = false;
+            _connectionCancellation?.Cancel();
+            StopAssistanceButton.Content = "重新启用远控";
+            SetStatus("已由本机停止", "#9A332D");
             return;
         }
-        _localAssistanceEnabled = false;
-        SetStatus("已由本机停止", "#9A332D");
+
+        _localAssistanceEnabled = true;
+        StopAssistanceButton.Content = "停止远控";
+        if (_connectionTask is not null)
+        {
+            await _connectionTask;
+        }
+        StartConnectionLoop();
     }
 
     private void ExitClient_Click(object sender, RoutedEventArgs e) => Close();
@@ -129,5 +152,127 @@ public partial class MainWindow : Window
     {
         StatusText.Text = text;
         StatusDot.Fill = (Brush)new BrushConverter().ConvertFromString(color)!;
+    }
+
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e) => StartConnectionLoop();
+
+    private void StartConnectionLoop()
+    {
+        if (!_localAssistanceEnabled || _connectionTask is { IsCompleted: false }) return;
+        _connectionCancellation?.Dispose();
+        _connectionCancellation = new CancellationTokenSource();
+        _connectionTask = RunConnectionLoopAsync(_connectionCancellation.Token);
+    }
+
+    private async Task RunConnectionLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _bootstrap ??= await PrepareBootstrapWithRetryAsync(cancellationToken);
+
+            var failedAttempt = 0;
+            while (_localAssistanceEnabled && !cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    SetStatus(failedAttempt == 0 ? "正在连接" : "正在重新连接", "#9A7440");
+                    var result = await _connectionClient.RunAsync(
+                        _bootstrap.ServerUrl,
+                        _bootstrap.Identity,
+                        _bootstrap.Identity.DeviceId,
+                        GetClientVersion(),
+                        RuntimeInformation.OSDescription,
+                        () =>
+                        {
+                            failedAttempt = 0;
+                            SetStatus("已在线", "#2E7D4F");
+                        },
+                        cancellationToken);
+                    if (result.Revoked)
+                    {
+                        _localAssistanceEnabled = false;
+                        StopAssistanceButton.Content = "登记已撤销";
+                        StopAssistanceButton.IsEnabled = false;
+                        SetStatus("登记已撤销", "#9A332D");
+                        return;
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception)
+                {
+                    SetStatus("连接中断，稍后重试", "#9A7440");
+                    var jitter = Random.Shared.NextDouble() * 0.4 - 0.2;
+                    var retryDelay = _reconnectBackoff.GetDelay(failedAttempt++, jitter);
+                    await Task.Delay(retryDelay, cancellationToken);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (InvalidDataException exception)
+        {
+            SetStatus(exception.Message, "#9A332D");
+        }
+        catch (InvalidOperationException exception)
+        {
+            SetStatus(exception.Message, "#9A332D");
+        }
+    }
+
+    private async Task<AgentBootstrapResult> PrepareBootstrapWithRetryAsync(
+        CancellationToken cancellationToken)
+    {
+        var failedAttempt = 0;
+        while (true)
+        {
+            try
+            {
+                return await CreateBootstrapService().PrepareAsync(
+                    DateTimeOffset.UtcNow,
+                    Environment.MachineName,
+                    RuntimeInformation.OSDescription,
+                    GetClientVersion(),
+                    cancellationToken);
+            }
+            catch (Exception exception) when (
+                exception is not InvalidDataException and not InvalidOperationException &&
+                !cancellationToken.IsCancellationRequested)
+            {
+                SetStatus("登记连接失败，稍后重试", "#9A7440");
+                var jitter = Random.Shared.NextDouble() * 0.4 - 0.2;
+                await Task.Delay(
+                    _reconnectBackoff.GetDelay(failedAttempt++, jitter),
+                    cancellationToken);
+            }
+        }
+    }
+
+    private AgentBootstrapService CreateBootstrapService()
+    {
+        Directory.CreateDirectory(_settingsDirectory);
+        return new AgentBootstrapService(
+            Path.Combine(_settingsDirectory, "identity.json"),
+            Path.Combine(_settingsDirectory, "agent-config.json"),
+            Path.Combine(AppContext.BaseDirectory, "enrollment.json"),
+            _httpClient);
+    }
+
+    private static string GetClientVersion() =>
+        Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.1.0";
+
+    private async void MainWindow_Closed(object? sender, EventArgs e)
+    {
+        _connectionCancellation?.Cancel();
+        if (_connectionTask is not null)
+        {
+            await _connectionTask;
+        }
+        _bootstrap?.Dispose();
+        _connectionCancellation?.Dispose();
+        _httpClient.Dispose();
     }
 }

@@ -19,9 +19,11 @@
 - PostgreSQL 初始迁移、迁移/回滚执行器、5 台设备上限的串行化登记事务。
 - Windows 中文欢迎页、欢迎图选择与真实格式校验、停止/退出按钮。
 - Windows Ed25519 独立设备身份，私钥使用当前 Windows 用户的 DPAPI 保护。
+- Windows 测试包首次从 EXE 同目录读取专属 `enrollment.json`，登记成功后移除已消费令牌文件；以后启动加载本机 DPAPI 身份并自动连接。
+- 设备 WebSocket 使用一次性 Ed25519 挑战认证、20 秒心跳、撤销检查和 1–30 秒带抖动退避重连；本机停止后只允许本机明确重新启用。
 - Test/Production 独立编译配置，正式构建无法调用测试自动批准策略。
 
-屏幕查看、输入控制、文件传输和 Render 部署尚未实现，详见 [state.md](state.md)。
+以上连接链路尚未在真实 PostgreSQL/Render 环境做端到端验收。屏幕查看、输入控制、文件传输和 Render 部署尚未实现，详见 [state.md](state.md)。
 
 ## 本地准备
 

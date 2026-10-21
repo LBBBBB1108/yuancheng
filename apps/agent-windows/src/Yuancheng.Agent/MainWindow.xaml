@@ -53,7 +53,7 @@
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal">
                 <Button Content="更换欢迎图" Click="ChooseImage_Click" Padding="18,11" Margin="0,0,10,0" />
-                <Button Content="停止远控" Click="StopAssistance_Click" Padding="18,11" Margin="0,0,10,0"
+                <Button x:Name="StopAssistanceButton" Content="停止远控" Click="StopAssistance_Click" Padding="18,11" Margin="0,0,10,0"
                         Background="#9A332D" Foreground="White" />
                 <Button Content="退出客户端" Click="ExitClient_Click" Padding="18,11"
                         Background="{StaticResource AccentBrush}" Foreground="White" />
