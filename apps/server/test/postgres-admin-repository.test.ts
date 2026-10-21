@@ -93,4 +93,35 @@ describe('PostgreSQL administrator and device repositories', () => {
     expect(pool.statements[0]).toContain('JOIN admin_device_grants');
     expect(pool.statements[0]).toContain('d.revoked_at IS NULL');
   });
+
+  it('loads only active device credentials and records successful authentication', async () => {
+    const pool = new FakePool([
+      { rows: [{ id: 'device-id', public_key: Buffer.alloc(32, 1).toString('base64') }] },
+      { rows: [{ id: 'device-id' }] },
+      { rows: [{ id: 'device-id' }] },
+    ]);
+    const repository = new PostgresDeviceRepository(pool);
+
+    await expect(repository.findActiveCredential('device-id')).resolves.toEqual({
+      deviceId: 'device-id',
+      publicKey: Buffer.alloc(32, 1).toString('base64'),
+    });
+    await expect(repository.recordAuthenticated({
+      deviceId: 'device-id',
+      clientVersion: '0.1.0-test',
+      osVersion: 'Windows 11',
+      authenticatedAt: new Date('2026-10-22T08:00:00.000Z'),
+    })).resolves.toBe(true);
+    await expect(
+      repository.recordHeartbeat('device-id', new Date('2026-10-22T08:00:20.000Z')),
+    ).resolves.toBe(true);
+
+    expect(pool.statements[0]).toContain('revoked_at IS NULL');
+    expect(pool.statements[1]).toContain('UPDATE devices');
+    expect(pool.statements[1]).toContain('last_seen_at');
+    expect(pool.statements[1]).toContain('revoked_at IS NULL');
+    expect(pool.statements[2]).toContain('UPDATE devices');
+    expect(pool.statements[2]).toContain('last_seen_at');
+    expect(pool.statements[2]).toContain('revoked_at IS NULL');
+  });
 });

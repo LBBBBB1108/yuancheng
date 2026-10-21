@@ -5,6 +5,7 @@ import { AdminAuthService } from './auth/admin-auth-service.js';
 import { PostgresAdminRepository } from './auth/postgres-admin-repository.js';
 import { loadConfig } from './config.js';
 import { PostgresDeviceRepository } from './devices/postgres-device-repository.js';
+import { DeviceAuthService } from './devices/device-auth-service.js';
 import { EnrollmentService } from './enrollment/enrollment-service.js';
 import { PairingService } from './enrollment/pairing-service.js';
 import { PostgresEnrollmentRepository } from './enrollment/postgres-enrollment-repository.js';
@@ -19,14 +20,16 @@ const pool = new pg.Pool({
   ssl: config.nodeEnv === 'production' ? { rejectUnauthorized: true } : undefined,
 });
 const adminRepository = new PostgresAdminRepository(pool);
+const deviceRepository = new PostgresDeviceRepository(pool);
 const app = await buildApp(config, {
   adminAuth: new AdminAuthService(adminRepository),
-  devices: new PostgresDeviceRepository(pool),
+  devices: deviceRepository,
   pairing: new PairingService(
     new PostgresPairingRepository(pool),
     config.publicServerUrl,
   ),
   enrollment: new EnrollmentService(new PostgresEnrollmentRepository(pool)),
+  deviceAuth: new DeviceAuthService(deviceRepository),
 });
 
 const shutdown = async (signal: string): Promise<void> => {

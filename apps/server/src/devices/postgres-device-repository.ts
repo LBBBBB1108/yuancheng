@@ -1,4 +1,9 @@
 import type { DeviceSummary } from '../app.js';
+import type {
+  ActiveDeviceCredential,
+  DeviceAuthRepository,
+  RecordAuthenticationRequest,
+} from './device-auth-service.js';
 
 interface QueryPool {
   query(text: string, values?: readonly unknown[]): Promise<{
@@ -6,7 +11,7 @@ interface QueryPool {
   }>;
 }
 
-export class PostgresDeviceRepository {
+export class PostgresDeviceRepository implements DeviceAuthRepository {
   public constructor(private readonly pool: QueryPool) {}
 
   public async listForAdministrator(administratorId: string): Promise<DeviceSummary[]> {
@@ -35,6 +40,50 @@ export class PostgresDeviceRepository {
       online: Boolean(row.online),
       lastSeenAt: toIsoString(row.last_seen_at),
     }));
+  }
+
+  public async findActiveCredential(deviceId: string): Promise<ActiveDeviceCredential | null> {
+    const result = await this.pool.query(
+      `SELECT id, public_key
+         FROM devices
+        WHERE id = $1
+          AND revoked_at IS NULL`,
+      [deviceId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return { deviceId: String(row.id), publicKey: String(row.public_key) };
+  }
+
+  public async recordAuthenticated(request: RecordAuthenticationRequest): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE devices
+          SET client_version = $2,
+              os_version = $3,
+              last_seen_at = $4
+        WHERE id = $1
+          AND revoked_at IS NULL
+      RETURNING id`,
+      [
+        request.deviceId,
+        request.clientVersion,
+        request.osVersion,
+        request.authenticatedAt,
+      ],
+    );
+    return result.rows.length === 1;
+  }
+
+  public async recordHeartbeat(deviceId: string, seenAt: Date): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE devices
+          SET last_seen_at = $2
+        WHERE id = $1
+          AND revoked_at IS NULL
+      RETURNING id`,
+      [deviceId, seenAt],
+    );
+    return result.rows.length === 1;
   }
 }
 

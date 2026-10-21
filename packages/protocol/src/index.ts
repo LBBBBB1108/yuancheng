@@ -7,6 +7,10 @@ const baseProperties = {
   protocolVersion: Type.Literal(PROTOCOL_VERSION),
 };
 
+const uuidString = Type.String({
+  pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+});
+
 export const DeviceHeartbeatSchema = Type.Object(
   {
     ...baseProperties,
@@ -20,7 +24,7 @@ export const DeviceAuthResponseSchema = Type.Object(
   {
     ...baseProperties,
     type: Type.Literal('device.auth.response'),
-    deviceId: Type.String({ format: 'uuid' }),
+    deviceId: uuidString,
     nonce: Type.String({ minLength: 32, maxLength: 256 }),
     signature: Type.String({ minLength: 64, maxLength: 256 }),
     clientVersion: Type.String({ minLength: 1, maxLength: 40 }),
@@ -35,6 +39,25 @@ export const DeviceAuthChallengeSchema = Type.Object(
     type: Type.Literal('device.auth.challenge'),
     nonce: Type.String({ minLength: 32, maxLength: 256 }),
     expiresAt: Type.String({ minLength: 20, maxLength: 35 }),
+  },
+  { additionalProperties: false },
+);
+
+export const DeviceAuthenticatedSchema = Type.Object(
+  {
+    ...baseProperties,
+    type: Type.Literal('device.authenticated'),
+    deviceId: uuidString,
+    heartbeatIntervalSeconds: Type.Integer({ minimum: 5, maximum: 60 }),
+  },
+  { additionalProperties: false },
+);
+
+export const DeviceHeartbeatAckSchema = Type.Object(
+  {
+    ...baseProperties,
+    type: Type.Literal('device.heartbeat.ack'),
+    receivedAt: Type.String({ minLength: 20, maxLength: 35 }),
   },
   { additionalProperties: false },
 );
@@ -62,6 +85,8 @@ export const JsonMessageSchema = Type.Union([
   DeviceHeartbeatSchema,
   DeviceAuthResponseSchema,
   DeviceAuthChallengeSchema,
+  DeviceAuthenticatedSchema,
+  DeviceHeartbeatAckSchema,
   DeviceRevokedSchema,
   ProtocolErrorSchema,
 ]);
@@ -72,6 +97,8 @@ const schemasByType = new Map<string, TSchema>([
   ['device.heartbeat', DeviceHeartbeatSchema],
   ['device.auth.response', DeviceAuthResponseSchema],
   ['device.auth.challenge', DeviceAuthChallengeSchema],
+  ['device.authenticated', DeviceAuthenticatedSchema],
+  ['device.heartbeat.ack', DeviceHeartbeatAckSchema],
   ['device.revoked', DeviceRevokedSchema],
   ['protocol.error', ProtocolErrorSchema],
 ]);

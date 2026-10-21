@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "test": "vitest run",
+    "test": "pnpm --filter @yuancheng/protocol build && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:migrate": "tsx src/database/cli.ts up",
     "db:rollback": "tsx src/database/cli.ts down"

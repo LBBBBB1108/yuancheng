@@ -72,6 +72,11 @@ describe('administrator HTTP API', () => {
         enrollment: {
           enroll: async () => ({ status: 'registered', deviceId: 'device-id' }),
         },
+        deviceAuth: {
+          createChallenge: () => ({ nonce: 'x'.repeat(43), expiresAt: new Date(Date.now() + 15_000) }),
+          authenticate: async () => ({ status: 'invalid_signature' }),
+          recordHeartbeat: async () => true,
+        },
       },
     );
 
@@ -151,6 +156,11 @@ describe('administrator HTTP API', () => {
         },
         enrollment: {
           enroll: async () => ({ status: 'invalid_token' }),
+        },
+        deviceAuth: {
+          createChallenge: () => ({ nonce: 'x'.repeat(43), expiresAt: new Date(Date.now() + 15_000) }),
+          authenticate: async () => ({ status: 'invalid_signature' }),
+          recordHeartbeat: async () => true,
         },
       },
     );

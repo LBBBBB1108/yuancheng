@@ -47,4 +47,34 @@ describe('parseJsonMessage', () => {
       }),
     ).toEqual({ ok: false, error: '消息格式无效' });
   });
+
+  it('accepts the server authentication acknowledgement', () => {
+    const result = parseJsonMessage({
+      type: 'device.authenticated',
+      protocolVersion: PROTOCOL_VERSION,
+      deviceId: '19d7b60c-f258-4be3-8e5a-698670687843',
+      heartbeatIntervalSeconds: 20,
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('accepts a heartbeat acknowledgement without allowing extra fields', () => {
+    expect(
+      parseJsonMessage({
+        type: 'device.heartbeat.ack',
+        protocolVersion: PROTOCOL_VERSION,
+        receivedAt: '2026-10-22T08:00:00.000Z',
+      }).ok,
+    ).toBe(true);
+
+    expect(
+      parseJsonMessage({
+        type: 'device.heartbeat.ack',
+        protocolVersion: PROTOCOL_VERSION,
+        receivedAt: '2026-10-22T08:00:00.000Z',
+        command: 'whoami',
+      }),
+    ).toEqual({ ok: false, error: '消息格式无效' });
+  });
 });

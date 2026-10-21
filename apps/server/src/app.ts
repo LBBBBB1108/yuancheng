@@ -2,6 +2,7 @@ import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { PROTOCOL_VERSION, parseJsonMessage } from '@yuancheng/protocol';
 
 import type { AppConfig } from './config.js';
 import type { LoginRequest, LoginResult } from './auth/admin-auth-service.js';
@@ -10,6 +11,10 @@ import type {
   EnrollmentResult,
 } from './enrollment/enrollment-service.js';
 import type { PairingDescriptor } from './enrollment/pairing-service.js';
+import type {
+  DeviceAuthResponse,
+  DeviceAuthResult,
+} from './devices/device-auth-service.js';
 
 export interface AuthenticatedAdministrator {
   id: string;
@@ -49,6 +54,11 @@ export interface AppServices {
   enrollment: {
     enroll(request: EnrollmentRequest): Promise<EnrollmentResult>;
   };
+  deviceAuth: {
+    createChallenge(now: Date): { nonce: string; expiresAt: Date };
+    authenticate(request: DeviceAuthResponse, now: Date): Promise<DeviceAuthResult>;
+    recordHeartbeat(deviceId: string, seenAt: Date): Promise<boolean>;
+  };
 }
 
 export async function buildApp(
@@ -82,6 +92,97 @@ export async function buildApp(
   }));
 
   if (services) {
+    app.get('/ws/device', { websocket: true }, (socket) => {
+      let authenticatedDeviceId: string | null = null;
+      const challenge = services.deviceAuth.createChallenge(new Date());
+      const authTimeout = setTimeout(() => {
+        sendProtocolError(socket, 'AUTH_TIMEOUT', '设备身份认证超时', true);
+      }, Math.max(1, challenge.expiresAt.getTime() - Date.now()));
+      authTimeout.unref();
+
+      socket.send(
+        JSON.stringify({
+          protocolVersion: PROTOCOL_VERSION,
+          type: 'device.auth.challenge',
+          nonce: challenge.nonce,
+          expiresAt: challenge.expiresAt.toISOString(),
+        }),
+      );
+
+      socket.on('message', (data: Buffer, isBinary: boolean) => {
+        void (async () => {
+          if (isBinary) {
+            sendProtocolError(socket, 'INVALID_MESSAGE', '身份认证阶段不接受二进制消息', true);
+            return;
+          }
+
+          const parsed = parseSocketMessage(data.toString());
+          if (!parsed.ok) {
+            sendProtocolError(socket, 'INVALID_MESSAGE', parsed.error, true);
+            return;
+          }
+
+          if (!authenticatedDeviceId) {
+            if (parsed.message.type !== 'device.auth.response') {
+              sendProtocolError(socket, 'AUTH_REQUIRED', '设备尚未通过身份认证', true);
+              return;
+            }
+
+            const result = await services.deviceAuth.authenticate(parsed.message, new Date());
+            if (result.status !== 'authenticated') {
+              sendProtocolError(socket, 'AUTH_FAILED', authFailureMessage(result.status), true);
+              return;
+            }
+
+            clearTimeout(authTimeout);
+            authenticatedDeviceId = result.deviceId;
+            socket.send(
+              JSON.stringify({
+                protocolVersion: PROTOCOL_VERSION,
+                type: 'device.authenticated',
+                deviceId: result.deviceId,
+                heartbeatIntervalSeconds: 20,
+              }),
+            );
+            return;
+          }
+
+          if (parsed.message.type !== 'device.heartbeat') {
+            sendProtocolError(socket, 'MESSAGE_NOT_ALLOWED', '当前连接不允许此消息类型', false);
+            return;
+          }
+
+          const stillActive = await services.deviceAuth.recordHeartbeat(
+            authenticatedDeviceId,
+            new Date(),
+          );
+          if (!stillActive) {
+            socket.send(
+              JSON.stringify({
+                protocolVersion: PROTOCOL_VERSION,
+                type: 'device.revoked',
+                reason: '设备登记已被撤销',
+              }),
+              () => socket.close(1008),
+            );
+            return;
+          }
+
+          socket.send(
+            JSON.stringify({
+              protocolVersion: PROTOCOL_VERSION,
+              type: 'device.heartbeat.ack',
+              receivedAt: new Date().toISOString(),
+            }),
+          );
+        })().catch(() => {
+          sendProtocolError(socket, 'SERVER_ERROR', '设备连接处理失败', true);
+        });
+      });
+
+      socket.once('close', () => clearTimeout(authTimeout));
+    });
+
     app.post<{ Body: { username?: unknown; password?: unknown } }>(
       '/api/v1/auth/login',
       async (request, reply) => {
@@ -206,6 +307,40 @@ export async function buildApp(
   });
 
   return app;
+}
+
+function parseSocketMessage(input: string) {
+  try {
+    return parseJsonMessage(JSON.parse(input) as unknown);
+  } catch {
+    return { ok: false as const, error: '消息格式无效' as const };
+  }
+}
+
+function sendProtocolError(
+  socket: { send(data: string, callback?: (error?: Error) => void): void; close(code?: number): void },
+  code: string,
+  message: string,
+  closeAfterSend: boolean,
+): void {
+  socket.send(
+    JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'protocol.error', code, message }),
+    () => {
+      if (closeAfterSend) socket.close(1008);
+    },
+  );
+}
+
+function authFailureMessage(status: Exclude<DeviceAuthResult['status'], 'authenticated'>): string {
+  switch (status) {
+    case 'expired_challenge':
+      return '设备身份认证挑战已过期';
+    case 'device_not_found':
+      return '设备未登记或已被撤销';
+    case 'invalid_challenge':
+    case 'invalid_signature':
+      return '设备身份凭证无效';
+  }
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: string[]): boolean {
