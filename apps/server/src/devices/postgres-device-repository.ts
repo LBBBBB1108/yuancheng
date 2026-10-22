@@ -12,6 +12,7 @@ import type {
   TestAuthorizationRepository,
   TestAuthorizationSummary,
 } from './test-authorization-service.js';
+import type { ConsentRequest, ConsentRequestRepository } from '../consent/consent-request-service.js';
 
 interface QueryPool {
   query(text: string, values?: readonly unknown[]): Promise<{
@@ -19,7 +20,7 @@ interface QueryPool {
   }>;
 }
 
-export class PostgresDeviceRepository implements DeviceAuthRepository, DeviceManagementRepository, TestAuthorizationRepository {
+export class PostgresDeviceRepository implements DeviceAuthRepository, DeviceManagementRepository, TestAuthorizationRepository, ConsentRequestRepository {
   public constructor(private readonly pool: QueryPool) {}
 
   public async listForAdministrator(administratorId: string): Promise<DeviceSummary[]> {
@@ -204,6 +205,74 @@ export class PostgresDeviceRepository implements DeviceAuthRepository, DeviceMan
     );
     const row = result.rows[0];
     return row ? { administratorId: String(row.administrator_id), validUntil: new Date(String(row.valid_until)) } : null;
+  }
+
+  public async createConsent(request: Omit<ConsentRequest, 'id' | 'status'>): Promise<{ status: 'created'; request: ConsentRequest } | { status: 'already_open' } | { status: 'not_found' }> {
+    const id = randomUUID();
+    const result = await this.pool.query(
+      `WITH authorized AS (
+         SELECT d.id FROM devices d JOIN admin_device_grants grant ON grant.device_id = d.id
+          WHERE d.id = $3 AND d.revoked_at IS NULL AND grant.administrator_id = $2
+            AND $4::text[] <@ grant.permissions
+       ), open_request AS (
+         SELECT 1 FROM remote_sessions WHERE device_id = $3 AND status IN ('pending', 'authorized')
+       ), created AS (
+         INSERT INTO remote_sessions (id, administrator_id, device_id, requested_permissions, status, mode, requested_at)
+         SELECT $1, $2, authorized.id, $4, 'pending', 'production', $5 FROM authorized
+          WHERE NOT EXISTS (SELECT 1 FROM open_request)
+         RETURNING id, administrator_id, device_id, requested_permissions, status, requested_at
+       )
+       SELECT created.*, EXISTS(SELECT 1 FROM authorized) AS authorized, EXISTS(SELECT 1 FROM open_request) AS already_open FROM created
+       UNION ALL SELECT NULL, NULL, NULL, NULL, NULL, NULL, EXISTS(SELECT 1 FROM authorized), EXISTS(SELECT 1 FROM open_request)
+        WHERE NOT EXISTS(SELECT 1 FROM created)`,
+      [id, request.administratorId, request.deviceId, request.permissions, request.requestedAt],
+    );
+    const row = result.rows[0];
+    if (!row || !Boolean(row.authorized)) return { status: 'not_found' };
+    if (Boolean(row.already_open)) return { status: 'already_open' };
+    const created: ConsentRequest = { id, administratorId: request.administratorId, administratorDisplayName: request.administratorDisplayName, deviceId: request.deviceId, permissions: request.permissions, status: 'pending', requestedAt: request.requestedAt, expiresAt: request.expiresAt };
+    await this.pool.query(`INSERT INTO audit_events (event_type, administrator_id, device_id, session_id, occurred_at, outcome, metadata) VALUES ('consent.requested', $1, $2, $3, $4, 'success', jsonb_build_object('permissions', $5))`, [request.administratorId, request.deviceId, id, request.requestedAt, request.permissions]);
+    return { status: 'created', request: created };
+  }
+
+  public async getConsent(requestId: string, administratorId: string, now: Date): Promise<ConsentRequest | null> {
+    await this.expire(now);
+    const result = await this.pool.query(`SELECT rs.id, rs.administrator_id, a.display_name, rs.device_id, rs.requested_permissions, rs.status, rs.requested_at FROM remote_sessions rs JOIN administrators a ON a.id = rs.administrator_id WHERE rs.id = $1 AND rs.administrator_id = $2`, [requestId, administratorId]);
+    const row = result.rows[0];
+    if (!row) return null;
+    const requestedAt = new Date(String(row.requested_at));
+    return { id: String(row.id), administratorId: String(row.administrator_id), administratorDisplayName: String(row.display_name), deviceId: String(row.device_id), permissions: row.requested_permissions as ConsentRequest['permissions'], status: String(row.status) as ConsentRequest['status'], requestedAt, expiresAt: new Date(requestedAt.getTime() + 60_000) };
+  }
+
+  public async respond(request: { requestId: string; deviceId: string; accepted: boolean; now: Date }): Promise<'authorized' | 'rejected' | 'timed_out' | 'ended' | 'not_found'> {
+    await this.expire(request.now);
+    const status = request.accepted ? 'authorized' : 'rejected';
+    const result = await this.pool.query(`UPDATE remote_sessions SET status = $4, authorized_at = CASE WHEN $4 = 'authorized' THEN $3 ELSE NULL END WHERE id = $1 AND device_id = $2 AND status = 'pending' AND requested_at + interval '60 seconds' > $3 RETURNING status, administrator_id, requested_permissions`, [request.requestId, request.deviceId, request.now, status]);
+    if (result.rows[0]) {
+      await this.pool.query(`INSERT INTO audit_events (event_type, administrator_id, device_id, session_id, occurred_at, outcome, metadata) VALUES ('consent.responded', $1, $2, $3, $4, 'success', jsonb_build_object('accepted', $5))`, [result.rows[0].administrator_id, request.deviceId, request.requestId, request.now, request.accepted]);
+      return status;
+    }
+    const current = await this.pool.query(`SELECT status FROM remote_sessions WHERE id = $1 AND device_id = $2`, [request.requestId, request.deviceId]);
+    return current.rows[0] ? String(current.rows[0].status) as 'timed_out' | 'ended' : 'not_found';
+  }
+
+  public async end(request: { requestId: string; administratorId: string; now: Date; reason: string }): Promise<'ended' | 'not_found' | 'terminal'> {
+    const result = await this.pool.query(`UPDATE remote_sessions SET status = 'ended', ended_at = $3, end_reason = $4 WHERE id = $1 AND administrator_id = $2 AND status IN ('pending', 'authorized') RETURNING device_id`, [request.requestId, request.administratorId, request.now, request.reason]);
+    if (result.rows[0]) return 'ended';
+    const current = await this.pool.query(`SELECT 1 FROM remote_sessions WHERE id = $1 AND administrator_id = $2`, [request.requestId, request.administratorId]);
+    return current.rows[0] ? 'terminal' : 'not_found';
+  }
+
+  public async expire(now: Date): Promise<void> {
+    await this.pool.query(`UPDATE remote_sessions SET status = 'timed_out', ended_at = $1, end_reason = '确认超时' WHERE status = 'pending' AND requested_at + interval '60 seconds' <= $1`, [now]);
+  }
+
+  public async endOpenForDevice(deviceId: string, now: Date, reason: string): Promise<void> {
+    await this.pool.query(`UPDATE remote_sessions SET status = 'ended', ended_at = $2, end_reason = $3 WHERE device_id = $1 AND status IN ('pending', 'authorized')`, [deviceId, now, reason]);
+  }
+
+  public async endAllOpenOnStartup(now: Date): Promise<void> {
+    await this.pool.query(`UPDATE remote_sessions SET status = 'ended', ended_at = $1, end_reason = '服务重启' WHERE status IN ('pending', 'authorized')`, [now]);
   }
 }
 

@@ -19,6 +19,13 @@ const testAuthorization = Type.Union([
   }, { additionalProperties: false }),
 ]);
 
+const consentPermission = Type.Union([
+  Type.Literal('view'),
+  Type.Literal('control'),
+  Type.Literal('files.upload'),
+  Type.Literal('files.download'),
+]);
+
 export const DeviceHeartbeatSchema = Type.Object(
   {
     ...baseProperties,
@@ -81,6 +88,30 @@ export const DeviceRevokedSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const ConsentRequestSchema = Type.Object({
+  ...baseProperties,
+  type: Type.Literal('consent.request'),
+  requestId: uuidString,
+  administratorId: uuidString,
+  administratorDisplayName: Type.String({ minLength: 1, maxLength: 80 }),
+  permissions: Type.Array(consentPermission, { minItems: 1, uniqueItems: true, maxItems: 4 }),
+  expiresAt: Type.String({ minLength: 20, maxLength: 35 }),
+}, { additionalProperties: false });
+
+export const ConsentResponseSchema = Type.Object({
+  ...baseProperties,
+  type: Type.Literal('consent.response'),
+  requestId: uuidString,
+  accepted: Type.Boolean(),
+}, { additionalProperties: false });
+
+export const ConsentEndedSchema = Type.Object({
+  ...baseProperties,
+  type: Type.Literal('consent.ended'),
+  requestId: uuidString,
+  reason: Type.String({ minLength: 1, maxLength: 80 }),
+}, { additionalProperties: false });
+
 export const ProtocolErrorSchema = Type.Object(
   {
     ...baseProperties,
@@ -98,6 +129,9 @@ export const JsonMessageSchema = Type.Union([
   DeviceAuthenticatedSchema,
   DeviceHeartbeatAckSchema,
   DeviceRevokedSchema,
+  ConsentRequestSchema,
+  ConsentResponseSchema,
+  ConsentEndedSchema,
   ProtocolErrorSchema,
 ]);
 
@@ -110,6 +144,9 @@ const schemasByType = new Map<string, TSchema>([
   ['device.authenticated', DeviceAuthenticatedSchema],
   ['device.heartbeat.ack', DeviceHeartbeatAckSchema],
   ['device.revoked', DeviceRevokedSchema],
+  ['consent.request', ConsentRequestSchema],
+  ['consent.response', ConsentResponseSchema],
+  ['consent.ended', ConsentEndedSchema],
   ['protocol.error', ProtocolErrorSchema],
 ]);
 

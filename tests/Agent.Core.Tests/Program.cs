@@ -162,6 +162,25 @@ try
         "0.1.0-test",
         CancellationToken.None));
     Check(!File.Exists(rejectedIdentityPath), "登记被拒绝时不能留下设备身份");
+
+var consentClock = new DateTimeOffset(2026, 10, 22, 8, 0, 0, TimeSpan.Zero);
+var consentState = new ConsentStateMachine(() => consentClock);
+var consent = consentState.Receive(new ConsentRequestState(
+    "39d7b60c-f258-4be3-8e5a-698670687843",
+    "29d7b60c-f258-4be3-8e5a-698670687843",
+    "测试管理员",
+    new[] { "view" },
+    consentClock.AddSeconds(60)),
+    AgentBuildMode.Production, false, true, false);
+Check(consent is not null && !consent.AutoApproved, "正式版必须等待本机确认");
+Check(consentState.Respond(consent!.RequestId, true) == ConsentDecision.Authorized, "同意应只授权当前请求");
+Check(consentState.Respond(consent.RequestId, false) == ConsentDecision.Invalid, "重复答复必须无效");
+var expired = consentState.Receive(new ConsentRequestState(
+    "49d7b60c-f258-4be3-8e5a-698670687843",
+    "29d7b60c-f258-4be3-8e5a-698670687843",
+    "测试管理员", new[] { "view" }, consentClock.AddSeconds(1)), AgentBuildMode.Production, false, true, false);
+consentClock = consentClock.AddSeconds(2);
+Check(consentState.Respond(expired!.RequestId, true) == ConsentDecision.TimedOut, "超时后的同意必须无效");
 }
 finally
 {

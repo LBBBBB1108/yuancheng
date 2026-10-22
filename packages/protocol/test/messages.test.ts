@@ -82,4 +82,21 @@ describe('parseJsonMessage', () => {
       }),
     ).toEqual({ ok: false, error: '消息格式无效' });
   });
+
+  it('accepts a consent request and rejects expanded device answers', () => {
+    const request = {
+      type: 'consent.request',
+      protocolVersion: PROTOCOL_VERSION,
+      requestId: '39d7b60c-f258-4be3-8e5a-698670687843',
+      administratorId: '29d7b60c-f258-4be3-8e5a-698670687843',
+      administratorDisplayName: '测试管理员',
+      permissions: ['view'],
+      expiresAt: '2026-10-22T08:01:00.000Z',
+    };
+    expect(parseJsonMessage(request).ok).toBe(true);
+    expect(parseJsonMessage({
+      type: 'consent.response', protocolVersion: PROTOCOL_VERSION,
+      requestId: request.requestId, accepted: true, permissions: ['control'],
+    })).toEqual({ ok: false, error: '消息格式无效' });
+  });
 });

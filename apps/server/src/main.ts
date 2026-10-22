@@ -8,6 +8,7 @@ import { PostgresDeviceRepository } from './devices/postgres-device-repository.j
 import { DeviceManagementService } from './devices/device-management-service.js';
 import { DeviceAuthService } from './devices/device-auth-service.js';
 import { TestAuthorizationService } from './devices/test-authorization-service.js';
+import { ConsentRequestService } from './consent/consent-request-service.js';
 import { EnrollmentService } from './enrollment/enrollment-service.js';
 import { PairingService } from './enrollment/pairing-service.js';
 import { PostgresEnrollmentRepository } from './enrollment/postgres-enrollment-repository.js';
@@ -23,6 +24,8 @@ const pool = new pg.Pool({
 });
 const adminRepository = new PostgresAdminRepository(pool);
 const deviceRepository = new PostgresDeviceRepository(pool);
+const consentRequests = new ConsentRequestService(deviceRepository);
+await consentRequests.endAllOpenOnStartup(new Date());
 const app = await buildApp(config, {
   adminAuth: new AdminAuthService(adminRepository),
   devices: deviceRepository,
@@ -34,6 +37,7 @@ const app = await buildApp(config, {
   ),
   enrollment: new EnrollmentService(new PostgresEnrollmentRepository(pool)),
   deviceAuth: new DeviceAuthService(deviceRepository),
+  consentRequests,
 });
 
 const shutdown = async (signal: string): Promise<void> => {

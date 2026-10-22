@@ -34,7 +34,8 @@ public sealed class DeviceConnectionClient(
         string osVersion,
         Action connected,
         CancellationToken cancellationToken,
-        Action<TestAuthorizationState?>? authorizationUpdated = null)
+        Action<TestAuthorizationState?>? authorizationUpdated = null,
+        Func<ConsentRequestState, Task<bool>>? consentRequested = null)
     {
         await using var transport = transportFactory();
         try
@@ -63,12 +64,24 @@ public sealed class DeviceConnectionClient(
                 await transport.SendTextAsync(
                     DeviceWireProtocol.CreateHeartbeat(utcNow()),
                     cancellationToken);
-                var heartbeatResponse = DeviceWireProtocol.ParseHeartbeatResponse(
-                    await transport.ReceiveTextAsync(cancellationToken));
-                authorizationUpdated?.Invoke(heartbeatResponse.TestAuthorization);
-                if (heartbeatResponse.Revoked)
+                var serverMessage = await transport.ReceiveTextAsync(cancellationToken);
+                try
                 {
-                    return new DeviceConnectionResult(true, heartbeatResponse.Reason);
+                    var heartbeatResponse = DeviceWireProtocol.ParseHeartbeatResponse(serverMessage);
+                    authorizationUpdated?.Invoke(heartbeatResponse.TestAuthorization);
+                    if (heartbeatResponse.Revoked)
+                    {
+                        return new DeviceConnectionResult(true, heartbeatResponse.Reason);
+                    }
+                }
+                catch (InvalidDataException)
+                {
+                    if (consentRequested is null) throw;
+                    var consent = DeviceWireProtocol.ParseConsentRequest(serverMessage);
+                    var accepted = await consentRequested(consent);
+                    await transport.SendTextAsync(
+                        DeviceWireProtocol.CreateConsentResponse(consent.RequestId, accepted),
+                        cancellationToken);
                 }
             }
         }

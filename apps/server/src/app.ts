@@ -15,6 +15,8 @@ import type {
   DeviceAuthResponse,
   DeviceAuthResult,
 } from './devices/device-auth-service.js';
+import type { ConsentRequestService } from './consent/consent-request-service.js';
+import type { ConsentRequest } from './consent/consent-request-service.js';
 
 export interface AuthenticatedAdministrator {
   id: string;
@@ -76,6 +78,7 @@ export interface AppServices {
     authenticate(request: DeviceAuthResponse, now: Date): Promise<DeviceAuthResult>;
     recordHeartbeat(deviceId: string, seenAt: Date): Promise<boolean>;
   };
+  consentRequests?: ConsentRequestService;
 }
 
 export async function buildApp(
@@ -109,6 +112,7 @@ export async function buildApp(
   }));
 
   if (services) {
+    const deviceSockets = new Map<string, { send(data: string, callback?: (error?: Error) => void): void; close(code?: number): void }>();
     app.get('/ws/device', { websocket: true }, (socket) => {
       let authenticatedDeviceId: string | null = null;
       const challenge = services.deviceAuth.createChallenge(new Date());
@@ -153,6 +157,12 @@ export async function buildApp(
 
             clearTimeout(authTimeout);
             authenticatedDeviceId = result.deviceId;
+            const priorSocket = deviceSockets.get(result.deviceId);
+            if (priorSocket && priorSocket !== socket) {
+              priorSocket.close(1008);
+              void services.consentRequests?.endOpenForDevice(result.deviceId, new Date(), '设备连接已替换');
+            }
+            deviceSockets.set(result.deviceId, socket);
             const testAuthorization = await services.testAuthorizations.getActiveForDevice(result.deviceId, new Date());
             socket.send(
               JSON.stringify({
@@ -166,6 +176,13 @@ export async function buildApp(
             return;
           }
 
+          if (parsed.message.type === 'consent.response' && services.consentRequests) {
+            const outcome = await services.consentRequests.respond({ requestId: parsed.message.requestId, deviceId: authenticatedDeviceId, accepted: parsed.message.accepted, now: new Date() });
+            if (outcome === 'not_found' || outcome === 'ended' || outcome === 'timed_out') {
+              sendProtocolError(socket, 'CONSENT_INVALID', '确认请求已失效', false);
+            }
+            return;
+          }
           if (parsed.message.type !== 'device.heartbeat') {
             sendProtocolError(socket, 'MESSAGE_NOT_ALLOWED', '当前连接不允许此消息类型', false);
             return;
@@ -202,7 +219,13 @@ export async function buildApp(
         });
       });
 
-      socket.once('close', () => clearTimeout(authTimeout));
+      socket.once('close', () => {
+        clearTimeout(authTimeout);
+        if (authenticatedDeviceId && deviceSockets.get(authenticatedDeviceId) === socket) {
+          deviceSockets.delete(authenticatedDeviceId);
+          void services.consentRequests?.endOpenForDevice(authenticatedDeviceId, new Date(), '设备连接中断');
+        }
+      });
     });
 
     app.post<{ Body: { username?: unknown; password?: unknown } }>(
@@ -371,6 +394,56 @@ export async function buildApp(
       return reply.status(200).send();
     });
 
+    app.post<{ Params: { deviceId?: string }; Body: Record<string, unknown> }>('/api/v1/devices/:deviceId/consent-requests', async (request, reply) => {
+      const token = request.cookies.yc_session;
+      const csrfToken = request.headers['x-csrf-token'];
+      const body = request.body ?? {};
+      if (!services.consentRequests) return reply.status(503).send({ error: '确认服务尚未配置' });
+      if (!isTrustedOrigin(request.headers.origin, config.adminWebOrigin) || !token || typeof csrfToken !== 'string') return reply.status(403).send({ error: '登录或请求校验已失效' });
+      const administrator = await services.adminAuth.authenticateMutation(token, csrfToken, new Date());
+      const session = administrator ? await services.adminAuth.getSession(token, new Date()) : null;
+      if (!administrator || !session) return reply.status(401).send({ error: '登录或请求校验已失效' });
+      if (!isUuid(request.params.deviceId) || !hasOnlyKeys(body, ['permissions']) || !Array.isArray(body.permissions) || !body.permissions.every((permission) => typeof permission === 'string')) return reply.status(400).send({ error: '确认请求格式无效' });
+      if (!deviceSockets.has(request.params.deviceId)) return reply.status(409).send({ error: '设备当前不在线，无法请求确认' });
+      const created = await services.consentRequests.create({ administratorId: administrator.id, administratorDisplayName: session.admin.displayName, administratorPermissions: administrator.permissions, deviceId: request.params.deviceId, permissions: body.permissions as string[], now: new Date() });
+      if (created.status === 'forbidden') return reply.status(403).send({ error: '没有所请求的远程权限' });
+      if (created.status === 'not_found') return reply.status(404).send({ error: '设备不存在、已撤销或未授权' });
+      if (created.status === 'already_open') return reply.status(409).send({ error: '该设备已有待处理或已确认请求' });
+      const socket = deviceSockets.get(created.request.deviceId);
+      if (!socket) return reply.status(409).send({ error: '设备连接已中断' });
+      socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'consent.request', requestId: created.request.id, administratorId: created.request.administratorId, administratorDisplayName: created.request.administratorDisplayName, permissions: created.request.permissions, expiresAt: created.request.expiresAt.toISOString() }));
+      return reply.status(201).send(serializeConsentRequest(created.request));
+    });
+
+    app.get<{ Params: { requestId?: string } }>('/api/v1/consent-requests/:requestId', async (request, reply) => {
+      const token = request.cookies.yc_session;
+      if (!services.consentRequests) return reply.status(503).send({ error: '确认服务尚未配置' });
+      if (!isTrustedOrigin(request.headers.origin, config.adminWebOrigin) || !token) return reply.status(403).send({ error: '登录或请求校验已失效' });
+      const administrator = await services.adminAuth.authenticate(token, new Date());
+      if (!administrator) return reply.status(401).send({ error: '登录已失效' });
+      if (!isUuid(request.params.requestId)) return reply.status(400).send({ error: '确认请求格式无效' });
+      const consent = await services.consentRequests.get(request.params.requestId, administrator.id, new Date());
+      if (!consent) return reply.status(404).send({ error: '确认请求不存在' });
+      return reply.send(serializeConsentRequest(consent));
+    });
+
+    app.post<{ Params: { requestId?: string } }>('/api/v1/consent-requests/:requestId/end', async (request, reply) => {
+      const token = request.cookies.yc_session;
+      const csrfToken = request.headers['x-csrf-token'];
+      if (!services.consentRequests) return reply.status(503).send({ error: '确认服务尚未配置' });
+      if (!isTrustedOrigin(request.headers.origin, config.adminWebOrigin) || !token || typeof csrfToken !== 'string') return reply.status(403).send({ error: '登录或请求校验已失效' });
+      const administrator = await services.adminAuth.authenticateMutation(token, csrfToken, new Date());
+      if (!administrator) return reply.status(401).send({ error: '登录或请求校验已失效' });
+      if (!isUuid(request.params.requestId)) return reply.status(400).send({ error: '确认请求格式无效' });
+      const consent = await services.consentRequests.get(request.params.requestId, administrator.id, new Date());
+      if (!consent) return reply.status(404).send({ error: '确认请求不存在' });
+      const outcome = await services.consentRequests.end({ requestId: request.params.requestId, administratorId: administrator.id, now: new Date(), reason: '管理员结束确认' });
+      if (outcome === 'terminal') return reply.status(409).send({ error: '确认请求已经结束' });
+      const socket = deviceSockets.get(consent.deviceId);
+      socket?.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'consent.ended', requestId: consent.id, reason: '管理员结束确认' }));
+      return reply.status(204).send();
+    });
+
     app.post<{ Body: { requestedDeviceName?: unknown } }>(
       '/api/v1/pairing-packages',
       async (request, reply) => {
@@ -486,6 +559,19 @@ function authFailureMessage(status: Exclude<DeviceAuthResult['status'], 'authent
 
 function serializeTestAuthorization(authorization: { administratorId: string; validUntil: Date } | null) {
   return authorization && { administratorId: authorization.administratorId, validUntil: authorization.validUntil.toISOString() };
+}
+
+function serializeConsentRequest(request: ConsentRequest) {
+  return {
+    id: request.id,
+    deviceId: request.deviceId,
+    administrator: { id: request.administratorId, displayName: request.administratorDisplayName },
+    permissions: request.permissions,
+    status: request.status,
+    requestedAt: request.requestedAt.toISOString(),
+    expiresAt: request.expiresAt.toISOString(),
+    remoteFeaturesAvailable: false,
+  };
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: string[]): boolean {

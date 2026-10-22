@@ -112,6 +112,40 @@ public static class DeviceWireProtocol
         throw new InvalidDataException("心跳响应消息类型无效");
     }
 
+    public static ConsentRequestState ParseConsentRequest(string requestJson)
+    {
+        using var document = ParseDocument(requestJson);
+        var root = document.RootElement;
+        RequireExactProperties(root, "protocolVersion", "type", "requestId", "administratorId", "administratorDisplayName", "permissions", "expiresAt");
+        RequireEnvelope(root, "consent.request");
+        var requestId = RequiredString(root, "requestId");
+        var administratorId = RequiredString(root, "administratorId");
+        var administratorDisplayName = RequiredString(root, "administratorDisplayName");
+        if (!Guid.TryParse(requestId, out _) || !Guid.TryParse(administratorId, out _) ||
+            administratorDisplayName.Length is < 1 or > 80 ||
+            !DateTimeOffset.TryParse(RequiredString(root, "expiresAt"), out var expiresAt) ||
+            !root.TryGetProperty("permissions", out var permissionsElement) || permissionsElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException("确认请求无效");
+        }
+        var permissions = permissionsElement.EnumerateArray().Select(element =>
+        {
+            if (element.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(element.GetString()))
+            {
+                throw new InvalidDataException("确认权限无效");
+            }
+            return element.GetString()!;
+        }).ToArray();
+        if (permissions.Length is < 1 or > 4 || permissions.Distinct(StringComparer.Ordinal).Count() != permissions.Length || permissions.Any(permission => permission is not ("view" or "control" or "files.upload" or "files.download")))
+        {
+            throw new InvalidDataException("确认权限无效");
+        }
+        return new ConsentRequestState(requestId, administratorId, administratorDisplayName, permissions, expiresAt);
+    }
+
+    public static string CreateConsentResponse(string requestId, bool accepted) => JsonSerializer.Serialize(
+        new { ProtocolVersion, Type = "consent.response", RequestId = requestId, Accepted = accepted }, JsonOptions);
+
     private static JsonDocument ParseDocument(string json)
     {
         try

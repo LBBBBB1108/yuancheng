@@ -23,6 +23,11 @@ interface TestAuthorizationDetails {
   authorization: { administratorId: string; displayName: string; validUntil: string } | null;
   candidates: Array<{ id: string; displayName: string }>;
 }
+interface ConsentRequestSummary {
+  id: string;
+  status: 'pending' | 'authorized' | 'rejected' | 'timed_out' | 'ended';
+  remoteFeaturesAvailable: boolean;
+}
 
 export function App() {
   const [username, setUsername] = useState('');
@@ -38,10 +43,17 @@ export function App() {
   const [confirmRevocation, setConfirmRevocation] = useState(false);
   const [testAuthorization, setTestAuthorization] = useState<TestAuthorizationDetails | null>(null);
   const [designatedAdministratorId, setDesignatedAdministratorId] = useState('');
+  const [consentRequest, setConsentRequest] = useState<ConsentRequestSummary | null>(null);
 
   useEffect(() => {
     void restoreSession();
   }, []);
+
+  useEffect(() => {
+    if (!consentRequest || consentRequest.status !== 'pending') return;
+    const timer = window.setInterval(() => { void refreshConsentRequest(consentRequest.id); }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [consentRequest?.id, consentRequest?.status]);
 
   async function restoreSession() {
     try {
@@ -58,6 +70,8 @@ export function App() {
       setSession(currentSession);
       setCsrfToken(restoredCsrfToken);
       await loadDevices();
+      const savedRequestId = sessionStorage.getItem('yc-consent-request');
+      if (savedRequestId) await refreshConsentRequest(savedRequestId);
     } catch (reason) {
       setSession(null);
       setError(reason instanceof Error ? reason.message : '无法恢复登录状态');
@@ -198,6 +212,48 @@ export function App() {
     }
   }
 
+  async function requestConsent(device: DeviceSummary) {
+    if (!csrfToken) return;
+    setLoading(true); setError('');
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/v1/devices/${device.id}/consent-requests`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+        body: JSON.stringify({ permissions: ['view'] }),
+      });
+      if (!response.ok) throw new Error('无法发起确认请求，请检查设备是否在线。');
+      const created = await response.json() as ConsentRequestSummary;
+      sessionStorage.setItem('yc-consent-request', created.id);
+      setConsentRequest(created);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '无法发起确认请求'); }
+    finally { setLoading(false); }
+  }
+
+  async function refreshConsentRequest(requestId: string) {
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/v1/consent-requests/${requestId}`, { credentials: 'include' });
+      if (response.status === 404) { sessionStorage.removeItem('yc-consent-request'); setConsentRequest(null); return; }
+      if (!response.ok) return;
+      const current = await response.json() as ConsentRequestSummary;
+      setConsentRequest(current);
+      if (current.status !== 'pending') sessionStorage.removeItem('yc-consent-request');
+    } catch { /* polling failures keep the last verified server state visible */ }
+  }
+
+  async function endConsent() {
+    if (!consentRequest || !csrfToken) return;
+    setLoading(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/v1/consent-requests/${consentRequest.id}/end`, {
+        method: 'POST', credentials: 'include', headers: { 'x-csrf-token': csrfToken },
+      });
+      if (!response.ok) throw new Error('结束确认请求失败');
+      sessionStorage.removeItem('yc-consent-request');
+      setConsentRequest({ ...consentRequest, status: 'ended' });
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '结束确认请求失败'); }
+    finally { setLoading(false); }
+  }
+
   return (
     <main className="shell">
       <header className="masthead">
@@ -271,6 +327,9 @@ export function App() {
                   </div>
                   <div className="device-actions">
                     <span className={device.online ? 'online' : 'offline'}>{device.online ? '在线' : '离线'}</span>
+                    {session.permissions.includes('sessions.view') ? (
+                      <button disabled={loading || !device.online || consentRequest?.status === 'pending'} onClick={() => void requestConsent(device)} type="button">请求确认 {device.name}</button>
+                    ) : null}
                     {session.permissions.includes('devices.manage') ? (
                       <button onClick={() => void beginEdit(device)} type="button">编辑 {device.name}</button>
                     ) : null}
@@ -303,6 +362,16 @@ export function App() {
                 <button disabled={loading} onClick={() => setEditingDevice(null)} type="button">取消</button>
               </div>
             </form>
+          ) : null}
+          {consentRequest ? (
+            <section className="device-editor" aria-live="polite">
+              {consentRequest.status === 'pending' ? <p>正在等待本机用户确认。远程功能尚未开放。</p> : null}
+              {consentRequest.status === 'authorized' ? <p>本机用户已同意。远程功能尚未开放。</p> : null}
+              {consentRequest.status === 'rejected' ? <p>本机用户已拒绝此请求。</p> : null}
+              {consentRequest.status === 'timed_out' ? <p>确认请求已超时。</p> : null}
+              {consentRequest.status === 'ended' ? <p>确认请求已结束。</p> : null}
+              {consentRequest.status === 'pending' || consentRequest.status === 'authorized' ? <button disabled={loading} onClick={() => void endConsent()} type="button">结束确认请求</button> : null}
+            </section>
           ) : null}
         </section>
       )}

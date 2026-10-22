@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private Task? _connectionTask;
     private AgentBootstrapResult? _bootstrap;
     private TestAuthorizationState? _testAuthorization;
+    private readonly ConsentStateMachine _consentState = new();
 
     public MainWindow()
     {
@@ -75,6 +76,7 @@ public partial class MainWindow : Window
         if (_localAssistanceEnabled)
         {
             _localAssistanceEnabled = false;
+            _consentState.Clear();
             CreateConfigurationStore().SaveLocalAssistanceEnabled(false);
             _connectionCancellation?.Cancel();
             StopAssistanceButton.Content = "重新启用远控";
@@ -197,7 +199,8 @@ public partial class MainWindow : Window
                             SetStatus("已在线", "#2E7D4F");
                         },
                         cancellationToken,
-                        authorization => _testAuthorization = authorization);
+                        authorization => _testAuthorization = authorization,
+                        RequestLocalConsentAsync);
                     if (result.Revoked)
                     {
                         _localAssistanceEnabled = false;
@@ -276,8 +279,41 @@ public partial class MainWindow : Window
     private static string GetClientVersion() =>
         Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.1.0";
 
+    private async Task<bool> RequestLocalConsentAsync(ConsentRequestState request)
+    {
+        var buildMode = GetBuildMode();
+        var validTestAuthorization = (_testAuthorization?.ValidUntil > DateTimeOffset.UtcNow) == true;
+        var designatedAdministrator = _testAuthorization?.AdministratorId == request.AdministratorId;
+        var pending = _consentState.Receive(request, buildMode, validTestAuthorization, _localAssistanceEnabled, designatedAdministrator);
+        if (pending is null) return false;
+        if (pending.AutoApproved)
+        {
+            SetStatus("测试授权已自动确认", "#2E7D4F");
+            return _consentState.Respond(request.RequestId, true) == ConsentDecision.Authorized;
+        }
+        return await Dispatcher.InvokeAsync(() =>
+        {
+            var window = new ConsentWindow(request) { Owner = this };
+            window.ShowDialog();
+            var accepted = window.Accepted;
+            var outcome = _consentState.Respond(request.RequestId, accepted);
+            SetStatus(outcome == ConsentDecision.Authorized ? "本机已确认；远程功能尚未开放" : "本机已拒绝远程协助", outcome == ConsentDecision.Authorized ? "#2E7D4F" : "#9A332D");
+            return outcome == ConsentDecision.Authorized;
+        });
+    }
+
+    private static AgentBuildMode GetBuildMode()
+    {
+#if TEST_BUILD
+        return AgentBuildMode.Test;
+#else
+        return AgentBuildMode.Production;
+#endif
+    }
+
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _consentState.Clear();
         _connectionCancellation?.Cancel();
         if (_connectionTask is not null)
         {

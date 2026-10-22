@@ -72,6 +72,19 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '授予/续期七天' }));
     expect(await screen.findByText('已更新测试授权。')).toBeVisible();
   });
+
+  it('starts a view-only consent request and states that remote features remain unavailable', async () => {
+    const device = { id: '19d7b60c-f258-4be3-8e5a-698670687843', name: '财务测试机', groupName: null, osVersion: 'Windows 11', clientVersion: '0.1.0-test', online: true, lastSeenAt: null };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ admin: { id: 'admin-id', displayName: '测试管理员' }, permissions: ['devices.read', 'sessions.view'], expiresAt: '2026-10-28T08:00:00.000Z' }))
+      .mockResolvedValueOnce(jsonResponse({ csrfToken: 'csrf-token' }))
+      .mockResolvedValueOnce(jsonResponse({ devices: [device] }))
+      .mockResolvedValueOnce(jsonResponse({ id: '39d7b60c-f258-4be3-8e5a-698670687843', status: 'pending', remoteFeaturesAvailable: false }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: '请求确认 财务测试机' }));
+    expect(await screen.findByText('正在等待本机用户确认。远程功能尚未开放。')).toBeVisible();
+  });
 });
 
 function jsonResponse(payload: unknown): Response {
