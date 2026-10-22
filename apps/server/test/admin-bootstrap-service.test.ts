@@ -26,6 +26,16 @@ describe('AdminBootstrapService', () => {
     expect(repository.created?.passwordHash).toContain('$argon2id$');
   });
 
+  it('accepts an email address as the first administrator identifier', async () => {
+    const repository = new MemoryBootstrapRepository();
+    const service = new AdminBootstrapService(repository);
+
+    await expect(service.initialize({
+      username: 'xiangniantadeyangzi@gmail.com', displayName: 'Q', password: 'a-safe-long-password',
+    })).resolves.toBe('created');
+    expect(repository.created).toMatchObject({ username: 'xiangniantadeyangzi@gmail.com', displayName: 'Q' });
+  });
+
   it('does not call the repository for invalid administrator input', async () => {
     const repository = new MemoryBootstrapRepository();
     const service = new AdminBootstrapService(repository);

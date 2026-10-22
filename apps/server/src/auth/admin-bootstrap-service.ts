@@ -18,7 +18,9 @@ export class AdminBootstrapService {
   }): Promise<'created' | 'already_initialized' | 'invalid'> {
     const username = request.username.trim();
     const displayName = request.displayName.trim();
-    if (!/^[A-Za-z0-9._-]{1,80}$/.test(username) || displayName.length < 1 || displayName.length > 80 || request.password.length < 12 || request.password.length > 256) return 'invalid';
+    const isIdentifier = /^[A-Za-z0-9._-]{1,80}$/.test(username)
+      || /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(username);
+    if (!isIdentifier || username.length > 80 || displayName.length < 1 || displayName.length > 80 || request.password.length < 12 || request.password.length > 256) return 'invalid';
     const passwordHash = await argon2.hash(request.password, { type: argon2.argon2id });
     return await this.repository.initializeFirstAdministrator({ username, displayName, passwordHash }) ? 'created' : 'already_initialized';
   }

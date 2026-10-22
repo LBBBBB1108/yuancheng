@@ -63,6 +63,7 @@ describe('PostgresEnrollmentRepository', () => {
       { rows: [] },
       { rows: [] },
       { rows: [] },
+      { rows: [] },
     ]);
     const repository = new PostgresEnrollmentRepository({
       connect: async () => client,
@@ -74,6 +75,7 @@ describe('PostgresEnrollmentRepository', () => {
       status: 'registered',
       deviceId: 'de24faa0-fbcd-4f0a-a6e9-fbbfe8aadf1a',
     });
+    expect(client.statements.some((sql) => sql.startsWith('INSERT INTO admin_device_grants'))).toBe(true);
     expect(client.statements.some((sql) => sql.startsWith('UPDATE pairing_tokens'))).toBe(true);
     expect(client.statements.some((sql) => sql.startsWith('INSERT INTO audit_events'))).toBe(true);
     expect(client.statements.at(-1)).toBe('COMMIT');

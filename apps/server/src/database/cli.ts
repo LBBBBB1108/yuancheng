@@ -13,11 +13,12 @@ if (direction !== 'up' && direction !== 'down') {
 const config = loadConfig(process.env);
 const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 1 });
 const client = await pool.connect();
+const migrationsDirectory = resolve(import.meta.dirname, '../../../../migrations');
 
 try {
   const applied = await runMigrations(
     client,
-    resolve(process.cwd(), 'migrations'),
+    migrationsDirectory,
     direction satisfies MigrationDirection,
   );
   process.stdout.write(

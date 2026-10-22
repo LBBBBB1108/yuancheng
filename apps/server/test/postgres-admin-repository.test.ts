@@ -73,6 +73,7 @@ describe('PostgreSQL administrator and device repositories', () => {
     });
     expect(pool.statements[0]).toContain("status = 'active'");
     expect(pool.statements[2]).toContain('revoked_at IS NULL');
+    expect(pool.statements[2]).toContain('GROUP BY a.id, s.id');
   });
 
   it('lists only devices explicitly granted to the administrator', async () => {

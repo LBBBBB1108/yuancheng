@@ -31,7 +31,7 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
       );
 
       const tokenResult = await client.query(
-        `SELECT id, expires_at
+        `SELECT id, created_by, expires_at
            FROM pairing_tokens
           WHERE token_hash = $1 AND consumed_at IS NULL
           FOR UPDATE`,
@@ -73,6 +73,17 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
         ],
       );
       const insertedDeviceId = String(deviceResult.rows[0]?.id ?? deviceId);
+
+      await client.query(
+        `INSERT INTO admin_device_grants
+           (administrator_id, device_id, permissions, granted_by)
+         VALUES ($1, $2, $3, $1)`,
+        [
+          String(token.created_by),
+          insertedDeviceId,
+          ['view', 'control', 'files.upload', 'files.download'],
+        ],
+      );
 
       await client.query(
         'UPDATE pairing_tokens SET consumed_at = $1, consumed_by_device_id = $2 WHERE id = $3',

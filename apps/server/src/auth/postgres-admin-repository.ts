@@ -77,7 +77,7 @@ export class PostgresAdminRepository implements AdminAuthRepository, AdminBootst
           AND s.revoked_at IS NULL
           AND s.expires_at > $2
           AND a.status = 'active'
-        GROUP BY a.id, s.csrf_token_hash`,
+        GROUP BY a.id, s.id`,
       [tokenHash, now],
     );
     const row = result.rows[0];

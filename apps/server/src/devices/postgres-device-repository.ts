@@ -211,9 +211,9 @@ export class PostgresDeviceRepository implements DeviceAuthRepository, DeviceMan
     const id = randomUUID();
     const result = await this.pool.query(
       `WITH authorized AS (
-         SELECT d.id FROM devices d JOIN admin_device_grants grant ON grant.device_id = d.id
-          WHERE d.id = $3 AND d.revoked_at IS NULL AND grant.administrator_id = $2
-            AND $4::text[] <@ grant.permissions
+         SELECT d.id FROM devices d JOIN admin_device_grants device_grant ON device_grant.device_id = d.id
+          WHERE d.id = $3 AND d.revoked_at IS NULL AND device_grant.administrator_id = $2
+            AND $4::text[] <@ device_grant.permissions
        ), open_request AS (
          SELECT 1 FROM remote_sessions WHERE device_id = $3 AND status IN ('pending', 'authorized')
        ), created AS (
@@ -231,7 +231,7 @@ export class PostgresDeviceRepository implements DeviceAuthRepository, DeviceMan
     if (!row || !Boolean(row.authorized)) return { status: 'not_found' };
     if (Boolean(row.already_open)) return { status: 'already_open' };
     const created: ConsentRequest = { id, administratorId: request.administratorId, administratorDisplayName: request.administratorDisplayName, deviceId: request.deviceId, permissions: request.permissions, status: 'pending', requestedAt: request.requestedAt, expiresAt: request.expiresAt };
-    await this.pool.query(`INSERT INTO audit_events (event_type, administrator_id, device_id, session_id, occurred_at, outcome, metadata) VALUES ('consent.requested', $1, $2, $3, $4, 'success', jsonb_build_object('permissions', $5))`, [request.administratorId, request.deviceId, id, request.requestedAt, request.permissions]);
+    await this.pool.query(`INSERT INTO audit_events (event_type, administrator_id, device_id, session_id, occurred_at, outcome, metadata) VALUES ('consent.requested', $1, $2, $3, $4, 'success', jsonb_build_object('permissions', $5::text[]))`, [request.administratorId, request.deviceId, id, request.requestedAt, request.permissions]);
     return { status: 'created', request: created };
   }
 
