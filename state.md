@@ -1,7 +1,7 @@
 # yuancheng 项目状态
 
 - 当前阶段：阶段 0 已实现，阶段 1 进行中
-- 当前分支：`codex/stage-0-foundation`
+- 当前正式分支：`main`（本轮收尾完成后快进并推送）
 - 阶段大纲：已拆分为可独立实现和验收的小阶段，详见 `docs/staged-roadmap.md`。
 - 已完成：monorepo、锁定依赖、协议严格校验、PostgreSQL 初始迁移、管理员认证核心、一次性配对/登记核心、中文管理后台、Windows 欢迎页、Test/Production 构建、Ed25519+DPAPI 设备身份、设备 WebSocket 一次性挑战认证、心跳撤销检查、Windows 首次 HTTP 登记、后续自动连接、退避重连及本机停止/重新启用接线。
 - 已验证：Node 35 项单元/API/WebSocket 测试；TypeScript 类型检查；前后端生产构建；Windows 核心自动测试；WPF Test 与 Production 零警告构建。
