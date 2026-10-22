@@ -30,6 +30,12 @@ function createServices(
       authenticateMutation: async () => null,
     },
     devices: { listForAdministrator: async () => [] },
+    deviceManagement: { update: async () => 'not_found' as const, revoke: async () => 'not_found' as const },
+    testAuthorizations: {
+      get: async () => null,
+      grant: async () => 'not_found' as const,
+      getActiveForDevice: async () => null,
+    },
     pairing: {
       create: async () => {
         throw new Error('不应调用');
@@ -104,6 +110,7 @@ describe('device WebSocket', () => {
       type: 'device.authenticated',
       deviceId,
       heartbeatIntervalSeconds: 20,
+      testAuthorization: null,
     });
     expect(requests).toHaveLength(1);
 
@@ -117,6 +124,7 @@ describe('device WebSocket', () => {
     const heartbeatAck = await nextMessage(socket);
     expect(heartbeatAck.type).toBe('device.heartbeat.ack');
     expect(typeof heartbeatAck.receivedAt).toBe('string');
+    expect(heartbeatAck.testAuthorization).toBeNull();
     expect(heartbeats).toHaveLength(1);
 
     socket.close();

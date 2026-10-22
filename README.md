@@ -35,6 +35,7 @@ pnpm test
 pnpm typecheck
 pnpm build
 pnpm db:migrate
+pnpm admin:init
 ```
 
 启动服务端和后台：

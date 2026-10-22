@@ -29,7 +29,7 @@ public sealed class AgentConfigurationStore(string filePath)
         {
             File.WriteAllText(
                 temporaryPath,
-                JsonSerializer.Serialize(new ConfigurationDocument(1, serverUrl.ToString()), JsonOptions),
+                JsonSerializer.Serialize(new ConfigurationDocument(2, serverUrl.ToString(), TryLoadLocalAssistanceEnabled()), JsonOptions),
                 Encoding.UTF8);
             File.Move(temporaryPath, filePath, overwrite: true);
         }
@@ -53,13 +53,42 @@ public sealed class AgentConfigurationStore(string filePath)
             throw new InvalidDataException("客户端配置格式无效", exception);
         }
 
-        if (document.FormatVersion != 1 ||
+        if (document.FormatVersion is not (1 or 2) ||
             !Uri.TryCreate(document.ServerUrl, UriKind.Absolute, out var serverUrl) ||
             !IsAllowedServerUrl(serverUrl))
         {
             throw new InvalidDataException("客户端配置版本或服务器地址无效");
         }
         return serverUrl;
+    }
+
+    public bool LoadLocalAssistanceEnabled() => ReadDocument().FormatVersion == 1 || ReadDocument().LocalAssistanceEnabled;
+
+    public void SaveLocalAssistanceEnabled(bool enabled)
+    {
+        var document = ReadDocument();
+        var serverUrl = LoadServerUrl();
+        var directory = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+        var temporaryPath = $"{filePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(new ConfigurationDocument(2, serverUrl.ToString(), enabled), JsonOptions), Encoding.UTF8);
+            File.Move(temporaryPath, filePath, overwrite: true);
+        }
+        finally { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
+    }
+
+    private bool TryLoadLocalAssistanceEnabled()
+    {
+        try { return LoadLocalAssistanceEnabled(); }
+        catch (IOException) { return true; }
+    }
+
+    private ConfigurationDocument ReadDocument()
+    {
+        try { return JsonSerializer.Deserialize<ConfigurationDocument>(File.ReadAllText(filePath, Encoding.UTF8), JsonOptions) ?? throw new InvalidDataException("客户端配置为空"); }
+        catch (JsonException exception) { throw new InvalidDataException("客户端配置格式无效", exception); }
     }
 
     private static bool IsAllowedServerUrl(Uri url)
@@ -77,5 +106,5 @@ public sealed class AgentConfigurationStore(string filePath)
                (IPAddress.TryParse(url.Host, out var address) && IPAddress.IsLoopback(address));
     }
 
-    private sealed record ConfigurationDocument(int FormatVersion, string ServerUrl);
+    private sealed record ConfigurationDocument(int FormatVersion, string ServerUrl, bool LocalAssistanceEnabled = true);
 }

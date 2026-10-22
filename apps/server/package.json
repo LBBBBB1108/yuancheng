@@ -10,7 +10,8 @@
     "test": "pnpm --filter @yuancheng/protocol build && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:migrate": "tsx src/database/cli.ts up",
-    "db:rollback": "tsx src/database/cli.ts down"
+    "db:rollback": "tsx src/database/cli.ts down",
+    "admin:init": "tsx src/auth/init-admin-cli.ts"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.3",

@@ -7,7 +7,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 
 .shell {
   width: min(1120px, calc(100% - 40px));
@@ -40,7 +40,7 @@ h2 { margin-bottom: 12px; font-size: 28px; }
 .supporting-copy, .device-list span { color: #657168; line-height: 1.7; }
 form { display: grid; gap: 18px; }
 label { display: grid; gap: 8px; font-weight: 700; }
-input { width: 100%; border: 1px solid #bdc9bf; border-radius: 10px; background: #fff; padding: 12px 14px; }
+input, select { width: 100%; border: 1px solid #bdc9bf; border-radius: 10px; background: #fff; padding: 12px 14px; }
 input:focus { outline: 3px solid rgba(55, 114, 80, .18); border-color: #377250; }
 button { border: 0; border-radius: 10px; padding: 13px 18px; color: white; background: #214f38; font-weight: 800; cursor: pointer; }
 button:disabled { cursor: wait; opacity: .6; }
@@ -50,6 +50,11 @@ button:disabled { cursor: wait; opacity: .6; }
 .device-list { list-style: none; margin: 28px 0 0; padding: 0; }
 .device-list li { border-top: 1px solid #e0e4dc; padding: 20px 0; }
 .device-list li div { display: grid; gap: 5px; }
+.device-actions, .device-editor-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.device-actions button, .device-editor-actions button { padding: 8px 12px; }
+.device-editor { display: grid; gap: 16px; margin-top: 28px; padding-top: 28px; border-top: 1px solid #e0e4dc; }
+.device-editor h3 { margin: 0; }
+.danger { background: #9e3028; }
 .online { color: #176c3b !important; }
 .offline { color: #7a7f7b !important; }
 .empty-state { margin: 28px 0 0; padding: 32px; border-radius: 14px; background: #f2f4ef; color: #657168; }

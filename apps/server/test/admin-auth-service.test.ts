@@ -32,11 +32,29 @@ class MemoryAuthRepository implements AdminAuthRepository {
       return null;
     }
     return {
+      sessionId: this.createdSession.id,
       id: this.createdSession.administratorId,
+      displayName: this.admin?.displayName ?? '',
       permissions: ['devices.read'],
       csrfTokenHash: this.createdSession.csrfTokenHash,
+      expiresAt: this.createdSession.expiresAt,
     };
   }
+
+  async rotateSession(request: {
+    refreshTokenHash: string; csrfTokenHash: string; replacement: StoredAdminSession; now: Date;
+  }): Promise<boolean> {
+    if (
+      !this.createdSession || this.createdSession.refreshTokenHash !== request.refreshTokenHash ||
+      this.createdSession.csrfTokenHash !== request.csrfTokenHash || this.createdSession.expiresAt <= request.now
+    ) return false;
+    this.createdSession = request.replacement;
+    return true;
+  }
+
+  async revokeSession(): Promise<boolean> { return true; }
+  async revokeAllSessions(): Promise<boolean> { return true; }
+  async rotateCsrfToken(): Promise<boolean> { return true; }
 }
 
 describe('AdminAuthService', () => {
@@ -108,5 +126,30 @@ describe('AdminAuthService', () => {
 
     expect(result).toBeNull();
     expect(repository.createdSession).toBeUndefined();
+  });
+
+  it('rotates an authenticated session without extending its original expiry', async () => {
+    const repository = new MemoryAuthRepository({
+      id: '8cf836c8-2e28-4dd9-84ab-61a167774a3d',
+      displayName: '测试管理员',
+      passwordHash: await argon2.hash('right-password', { type: argon2.argon2id }),
+    });
+    const service = new AdminAuthService(repository);
+    const login = await service.login({
+      username: 'admin', password: 'right-password', now: new Date('2026-10-21T08:00:00.000Z'),
+      userAgent: 'vitest', ipAddress: '127.0.0.1',
+    });
+
+    const refreshed = await service.refresh(
+      login?.refreshToken ?? '', login?.csrfToken ?? '', new Date('2026-10-22T08:00:00.000Z'),
+      'vitest', '127.0.0.1',
+    );
+
+    expect(refreshed?.expiresAt).toEqual(new Date('2026-10-28T08:00:00.000Z'));
+    expect(refreshed?.refreshToken).not.toBe(login?.refreshToken);
+    await expect(service.authenticate(login?.refreshToken ?? '', new Date('2026-10-22T08:00:00.000Z')))
+      .resolves.toBeNull();
+    await expect(service.authenticate(refreshed?.refreshToken ?? '', new Date('2026-10-22T08:00:00.000Z')))
+      .resolves.toEqual({ id: '8cf836c8-2e28-4dd9-84ab-61a167774a3d', permissions: ['devices.read'] });
   });
 });

@@ -2,7 +2,10 @@ import type {
   AdminAuthRepository,
   StoredAdmin,
   StoredAdminSession,
+  StoredAuthenticatedSession,
 } from './admin-auth-service.js';
+import type { AdminBootstrapRepository } from './admin-bootstrap-service.js';
+import { randomUUID } from 'node:crypto';
 
 interface QueryPool {
   query(text: string, values?: readonly unknown[]): Promise<{
@@ -10,7 +13,15 @@ interface QueryPool {
   }>;
 }
 
-export class PostgresAdminRepository implements AdminAuthRepository {
+interface TransactionClient extends QueryPool {
+  release(): void;
+}
+
+interface TransactionPool extends QueryPool {
+  connect(): Promise<TransactionClient>;
+}
+
+export class PostgresAdminRepository implements AdminAuthRepository, AdminBootstrapRepository {
   public constructor(private readonly pool: QueryPool) {}
 
   public async findActiveByUsername(username: string): Promise<StoredAdmin | null> {
@@ -53,9 +64,9 @@ export class PostgresAdminRepository implements AdminAuthRepository {
   public async findSessionByRefreshTokenHash(
     tokenHash: string,
     now: Date,
-  ): Promise<{ id: string; permissions: string[]; csrfTokenHash: string } | null> {
+  ): Promise<StoredAuthenticatedSession | null> {
     const result = await this.pool.query(
-      `SELECT a.id, s.csrf_token_hash,
+      `SELECT a.id, a.display_name, s.id AS session_id, s.csrf_token_hash, s.expires_at,
               COALESCE(array_agg(DISTINCT permission) FILTER (WHERE permission IS NOT NULL), '{}') AS permissions
          FROM admin_sessions s
          JOIN administrators a ON a.id = s.administrator_id
@@ -72,11 +83,76 @@ export class PostgresAdminRepository implements AdminAuthRepository {
     const row = result.rows[0];
     if (!row) return null;
     return {
+      sessionId: String(row.session_id),
       id: String(row.id),
+      displayName: String(row.display_name),
       permissions: Array.isArray(row.permissions)
         ? row.permissions.map((permission) => String(permission))
         : [],
       csrfTokenHash: String(row.csrf_token_hash),
+      expiresAt: new Date(String(row.expires_at)),
     };
+  }
+
+  public async rotateSession(request: { refreshTokenHash: string; csrfTokenHash: string; replacement: StoredAdminSession; now: Date }): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE admin_sessions SET refresh_token_hash = $3, csrf_token_hash = $4, last_seen_at = $5, user_agent = $6, ip_address = $7
+       WHERE refresh_token_hash = $1 AND csrf_token_hash = $2 AND revoked_at IS NULL AND expires_at > $5 RETURNING id`,
+      [request.refreshTokenHash, request.csrfTokenHash, request.replacement.refreshTokenHash, request.replacement.csrfTokenHash, request.now, request.replacement.userAgent, request.replacement.ipAddress],
+    );
+    return result.rows.length === 1;
+  }
+
+  public async revokeSession(request: { refreshTokenHash: string; csrfTokenHash: string; now: Date }): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE admin_sessions SET revoked_at = $3 WHERE refresh_token_hash = $1 AND csrf_token_hash = $2 AND revoked_at IS NULL AND expires_at > $3 RETURNING id`,
+      [request.refreshTokenHash, request.csrfTokenHash, request.now],
+    );
+    return result.rows.length === 1;
+  }
+
+  public async revokeAllSessions(administratorId: string, now: Date): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE admin_sessions SET revoked_at = $2 WHERE administrator_id = $1 AND revoked_at IS NULL AND expires_at > $2 RETURNING id`,
+      [administratorId, now],
+    );
+    return result.rows.length > 0;
+  }
+
+  public async rotateCsrfToken(request: { refreshTokenHash: string; csrfTokenHash: string; now: Date }): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE admin_sessions SET csrf_token_hash = $2, last_seen_at = $3 WHERE refresh_token_hash = $1 AND revoked_at IS NULL AND expires_at > $3 RETURNING id`,
+      [request.refreshTokenHash, request.csrfTokenHash, request.now],
+    );
+    return result.rows.length === 1;
+  }
+
+  public async initializeFirstAdministrator(request: { username: string; displayName: string; passwordHash: string }): Promise<boolean> {
+    if (!('connect' in this.pool) || typeof this.pool.connect !== 'function') {
+      throw new Error('数据库不支持管理员初始化事务');
+    }
+    const client = await (this.pool as TransactionPool).connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('yuancheng-admin-bootstrap'))");
+      const existing = await client.query('SELECT id FROM administrators LIMIT 1');
+      if (existing.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+      const administratorId = randomUUID();
+      const roleId = randomUUID();
+      const permissions = ['admins.manage', 'devices.read', 'devices.manage', 'sessions.view', 'sessions.control', 'files.upload', 'files.download', 'audit.read'];
+      await client.query('INSERT INTO roles (id, name, permissions) VALUES ($1, $2, $3)', [roleId, '管理员', permissions]);
+      await client.query('INSERT INTO administrators (id, username, display_name, password_hash) VALUES ($1, $2, $3, $4)', [administratorId, request.username, request.displayName, request.passwordHash]);
+      await client.query('INSERT INTO administrator_roles (administrator_id, role_id) VALUES ($1, $2)', [administratorId, roleId]);
+      await client.query('COMMIT');
+      return true;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }

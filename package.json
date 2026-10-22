@@ -14,6 +14,7 @@
     "dev:admin": "pnpm --filter @yuancheng/admin-web dev",
     "db:migrate": "pnpm --filter @yuancheng/server db:migrate",
     "db:rollback": "pnpm --filter @yuancheng/server db:rollback"
+    ,"admin:init": "pnpm --filter @yuancheng/server admin:init"
   },
   "devDependencies": {
     "@types/node": "26.6.5",

@@ -31,8 +31,11 @@ describe('PostgreSQL administrator and device repositories', () => {
         rows: [
           {
             id: 'admin-id',
+            session_id: 'session-id',
+            display_name: '测试管理员',
             permissions: ['devices.read', 'sessions.view'],
             csrf_token_hash: 'b'.repeat(64),
+            expires_at: '2026-10-28T08:00:00.000Z',
           },
         ],
       },
@@ -61,9 +64,12 @@ describe('PostgreSQL administrator and device repositories', () => {
         new Date('2026-10-21T08:01:00.000Z'),
       ),
     ).resolves.toEqual({
+      sessionId: 'session-id',
       id: 'admin-id',
+      displayName: '测试管理员',
       permissions: ['devices.read', 'sessions.view'],
       csrfTokenHash: 'b'.repeat(64),
+      expiresAt: new Date('2026-10-28T08:00:00.000Z'),
     });
     expect(pool.statements[0]).toContain("status = 'active'");
     expect(pool.statements[2]).toContain('revoked_at IS NULL');
@@ -123,5 +129,23 @@ describe('PostgreSQL administrator and device repositories', () => {
     expect(pool.statements[2]).toContain('UPDATE devices');
     expect(pool.statements[2]).toContain('last_seen_at');
     expect(pool.statements[2]).toContain('revoked_at IS NULL');
+  });
+
+  it('updates or revokes only an administrator-authorized active device', async () => {
+    const pool = new FakePool([{ rows: [{ id: 'device-id' }] }, { rows: [{ id: 'device-id' }] }]);
+    const repository = new PostgresDeviceRepository(pool);
+
+    await expect(repository.update({
+      administratorId: 'admin-id', deviceId: 'device-id', name: '财务机', groupName: '财务部',
+      now: new Date('2026-10-22T08:00:00.000Z'),
+    })).resolves.toBe(true);
+    await expect(repository.revoke({
+      administratorId: 'admin-id', deviceId: 'device-id', now: new Date('2026-10-22T08:01:00.000Z'),
+    })).resolves.toBe(true);
+
+    expect(pool.statements[0]).toContain("'view' = ANY(adg.permissions)");
+    expect(pool.statements[0]).toContain('d.revoked_at IS NULL');
+    expect(pool.statements[1]).toContain("revoked_reason = '管理员撤销'");
+    expect(pool.statements[1]).toContain('FROM admin_device_grants');
   });
 });

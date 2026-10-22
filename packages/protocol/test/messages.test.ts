@@ -54,6 +54,10 @@ describe('parseJsonMessage', () => {
       protocolVersion: PROTOCOL_VERSION,
       deviceId: '19d7b60c-f258-4be3-8e5a-698670687843',
       heartbeatIntervalSeconds: 20,
+      testAuthorization: {
+        administratorId: '29d7b60c-f258-4be3-8e5a-698670687843',
+        validUntil: '2026-10-29T08:00:00.000Z',
+      },
     });
 
     expect(result.ok).toBe(true);
@@ -65,6 +69,7 @@ describe('parseJsonMessage', () => {
         type: 'device.heartbeat.ack',
         protocolVersion: PROTOCOL_VERSION,
         receivedAt: '2026-10-22T08:00:00.000Z',
+      testAuthorization: null,
       }).ok,
     ).toBe(true);
 

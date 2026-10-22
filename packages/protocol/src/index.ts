@@ -11,6 +11,14 @@ const uuidString = Type.String({
   pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
 });
 
+const testAuthorization = Type.Union([
+  Type.Null(),
+  Type.Object({
+    administratorId: uuidString,
+    validUntil: Type.String({ minLength: 20, maxLength: 35 }),
+  }, { additionalProperties: false }),
+]);
+
 export const DeviceHeartbeatSchema = Type.Object(
   {
     ...baseProperties,
@@ -49,6 +57,7 @@ export const DeviceAuthenticatedSchema = Type.Object(
     type: Type.Literal('device.authenticated'),
     deviceId: uuidString,
     heartbeatIntervalSeconds: Type.Integer({ minimum: 5, maximum: 60 }),
+    testAuthorization,
   },
   { additionalProperties: false },
 );
@@ -58,6 +67,7 @@ export const DeviceHeartbeatAckSchema = Type.Object(
     ...baseProperties,
     type: Type.Literal('device.heartbeat.ack'),
     receivedAt: Type.String({ minLength: 20, maxLength: 35 }),
+    testAuthorization,
   },
   { additionalProperties: false },
 );

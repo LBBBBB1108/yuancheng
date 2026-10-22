@@ -27,6 +27,14 @@ Check(
         designatedAdministrator: true),
     "本机停止后不能自动恢复");
 
+Check(
+    DeviceWireProtocol.ParseAuthenticationAcknowledgement(
+        """
+        {"protocolVersion":1,"type":"device.authenticated","deviceId":"de24faa0-fbcd-4f0a-a6e9-fbbfe8aadf1a","heartbeatIntervalSeconds":20,"testAuthorization":{"administratorId":"19d7b60c-f258-4be3-8e5a-698670687843","validUntil":"2026-10-29T08:00:00.000Z"}}
+        """,
+        "de24faa0-fbcd-4f0a-a6e9-fbbfe8aadf1a").TestAuthorization?.AdministratorId == "19d7b60c-f258-4be3-8e5a-698670687843",
+    "认证确认应携带指定管理员的测试授权");
+
 var backoff = new ReconnectBackoff(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(30));
 Check(backoff.GetDelay(0, jitterRatio: 0) == TimeSpan.FromSeconds(1), "首次重连等待 1 秒");
 Check(backoff.GetDelay(10, jitterRatio: 0) == TimeSpan.FromSeconds(30), "重连等待上限为 30 秒");
@@ -187,10 +195,10 @@ using (var protocolIdentity = new DeviceIdentityStore("unused").CreatePending())
 
     var heartbeatInterval = DeviceWireProtocol.ParseAuthenticationAcknowledgement(
         """
-        {"protocolVersion":1,"type":"device.authenticated","deviceId":"de24faa0-fbcd-4f0a-a6e9-fbbfe8aadf1a","heartbeatIntervalSeconds":20}
+        {"protocolVersion":1,"type":"device.authenticated","deviceId":"de24faa0-fbcd-4f0a-a6e9-fbbfe8aadf1a","heartbeatIntervalSeconds":20,"testAuthorization":null}
         """,
         "de24faa0-fbcd-4f0a-a6e9-fbbfe8aadf1a");
-    Check(heartbeatInterval == TimeSpan.FromSeconds(20), "认证成功响应应提供受限心跳间隔");
+    Check(heartbeatInterval.HeartbeatInterval == TimeSpan.FromSeconds(20), "认证成功响应应提供受限心跳间隔");
     Check(
         DeviceWireProtocol.ParseHeartbeatResponse(
             """
@@ -220,7 +228,7 @@ using (var connectionIdentity = new DeviceIdentityStore("unused").CreatePending(
         {"protocolVersion":1,"type":"device.auth.challenge","nonce":"{{connectionNonce}}","expiresAt":"2026-10-22T08:00:15.000Z"}
         """,
         $$"""
-        {"protocolVersion":1,"type":"device.authenticated","deviceId":"{{connectionDeviceId}}","heartbeatIntervalSeconds":20}
+        {"protocolVersion":1,"type":"device.authenticated","deviceId":"{{connectionDeviceId}}","heartbeatIntervalSeconds":20,"testAuthorization":null}
         """,
         """
         {"protocolVersion":1,"type":"device.revoked","reason":"设备登记已被撤销"}

@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _connectionCancellation;
     private Task? _connectionTask;
     private AgentBootstrapResult? _bootstrap;
+    private TestAuthorizationState? _testAuthorization;
 
     public MainWindow()
     {
@@ -74,6 +75,7 @@ public partial class MainWindow : Window
         if (_localAssistanceEnabled)
         {
             _localAssistanceEnabled = false;
+            CreateConfigurationStore().SaveLocalAssistanceEnabled(false);
             _connectionCancellation?.Cancel();
             StopAssistanceButton.Content = "重新启用远控";
             SetStatus("已由本机停止", "#9A332D");
@@ -81,6 +83,7 @@ public partial class MainWindow : Window
         }
 
         _localAssistanceEnabled = true;
+        CreateConfigurationStore().SaveLocalAssistanceEnabled(true);
         StopAssistanceButton.Content = "停止远控";
         if (_connectionTask is not null)
         {
@@ -154,7 +157,13 @@ public partial class MainWindow : Window
         StatusDot.Fill = (Brush)new BrushConverter().ConvertFromString(color)!;
     }
 
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e) => StartConnectionLoop();
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        try { _localAssistanceEnabled = CreateConfigurationStore().LoadLocalAssistanceEnabled(); }
+        catch (IOException) { _localAssistanceEnabled = true; }
+        if (!_localAssistanceEnabled) { StopAssistanceButton.Content = "重新启用远控"; SetStatus("已由本机停止", "#9A332D"); return; }
+        StartConnectionLoop();
+    }
 
     private void StartConnectionLoop()
     {
@@ -187,7 +196,8 @@ public partial class MainWindow : Window
                             failedAttempt = 0;
                             SetStatus("已在线", "#2E7D4F");
                         },
-                        cancellationToken);
+                        cancellationToken,
+                        authorization => _testAuthorization = authorization);
                     if (result.Revoked)
                     {
                         _localAssistanceEnabled = false;
@@ -260,6 +270,8 @@ public partial class MainWindow : Window
             Path.Combine(AppContext.BaseDirectory, "enrollment.json"),
             _httpClient);
     }
+
+    private AgentConfigurationStore CreateConfigurationStore() => new(Path.Combine(_settingsDirectory, "agent-config.json"));
 
     private static string GetClientVersion() =>
         Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.1.0";

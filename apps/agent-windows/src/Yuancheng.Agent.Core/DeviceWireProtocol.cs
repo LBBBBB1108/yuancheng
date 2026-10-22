@@ -2,7 +2,9 @@ using System.Text.Json;
 
 namespace Yuancheng.Agent.Core;
 
-public sealed record HeartbeatResponse(bool Revoked, string? Reason);
+public sealed record TestAuthorizationState(string AdministratorId, DateTimeOffset ValidUntil);
+public sealed record AuthenticationAcknowledgement(TimeSpan HeartbeatInterval, TestAuthorizationState? TestAuthorization);
+public sealed record HeartbeatResponse(bool Revoked, string? Reason, TestAuthorizationState? TestAuthorization = null);
 
 public static class DeviceWireProtocol
 {
@@ -49,7 +51,7 @@ public static class DeviceWireProtocol
             JsonOptions);
     }
 
-    public static TimeSpan ParseAuthenticationAcknowledgement(
+    public static AuthenticationAcknowledgement ParseAuthenticationAcknowledgement(
         string responseJson,
         string expectedDeviceId)
     {
@@ -60,7 +62,7 @@ public static class DeviceWireProtocol
             "protocolVersion",
             "type",
             "deviceId",
-            "heartbeatIntervalSeconds");
+            "heartbeatIntervalSeconds", "testAuthorization");
         RequireEnvelope(root, "device.authenticated");
         if (RequiredString(root, "deviceId") != expectedDeviceId ||
             !root.TryGetProperty("heartbeatIntervalSeconds", out var intervalElement) ||
@@ -69,7 +71,7 @@ public static class DeviceWireProtocol
         {
             throw new InvalidDataException("设备认证成功响应无效");
         }
-        return TimeSpan.FromSeconds(interval);
+        return new AuthenticationAcknowledgement(TimeSpan.FromSeconds(interval), ParseTestAuthorization(root));
     }
 
     public static string CreateHeartbeat(DateTimeOffset sentAt) => JsonSerializer.Serialize(
@@ -88,13 +90,13 @@ public static class DeviceWireProtocol
         var type = RequiredString(root, "type");
         if (type == "device.heartbeat.ack")
         {
-            RequireExactProperties(root, "protocolVersion", "type", "receivedAt");
+            RequireExactProperties(root, "protocolVersion", "type", "receivedAt", "testAuthorization");
             RequireEnvelope(root, type);
             if (!DateTimeOffset.TryParse(RequiredString(root, "receivedAt"), out _))
             {
                 throw new InvalidDataException("心跳确认时间无效");
             }
-            return new HeartbeatResponse(false, null);
+            return new HeartbeatResponse(false, null, ParseTestAuthorization(root));
         }
         if (type == "device.revoked")
         {
@@ -164,6 +166,16 @@ public static class DeviceWireProtocol
             throw new InvalidDataException($"协议字段 {name} 无效");
         }
         return value.GetString()!;
+    }
+
+    private static TestAuthorizationState? ParseTestAuthorization(JsonElement root)
+    {
+        if (!root.TryGetProperty("testAuthorization", out var value)) throw new InvalidDataException("测试授权字段无效");
+        if (value.ValueKind == JsonValueKind.Null) return null;
+        RequireExactProperties(value, "administratorId", "validUntil");
+        var administratorId = RequiredString(value, "administratorId");
+        if (!Guid.TryParse(administratorId, out _) || !DateTimeOffset.TryParse(RequiredString(value, "validUntil"), out var validUntil)) throw new InvalidDataException("测试授权字段无效");
+        return new TestAuthorizationState(administratorId, validUntil);
     }
 
     private static byte[] DecodeBase64Url(string value)

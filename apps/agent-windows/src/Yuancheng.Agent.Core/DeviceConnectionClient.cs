@@ -33,7 +33,8 @@ public sealed class DeviceConnectionClient(
         string clientVersion,
         string osVersion,
         Action connected,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<TestAuthorizationState?>? authorizationUpdated = null)
     {
         await using var transport = transportFactory();
         try
@@ -50,19 +51,21 @@ public sealed class DeviceConnectionClient(
                     utcNow()),
                 cancellationToken);
             var acknowledgement = await transport.ReceiveTextAsync(cancellationToken);
-            var heartbeatInterval = DeviceWireProtocol.ParseAuthenticationAcknowledgement(
+            var acknowledgementState = DeviceWireProtocol.ParseAuthenticationAcknowledgement(
                 acknowledgement,
                 deviceId);
+            authorizationUpdated?.Invoke(acknowledgementState.TestAuthorization);
             connected();
 
             while (true)
             {
-                await delay(heartbeatInterval, cancellationToken);
+                await delay(acknowledgementState.HeartbeatInterval, cancellationToken);
                 await transport.SendTextAsync(
                     DeviceWireProtocol.CreateHeartbeat(utcNow()),
                     cancellationToken);
                 var heartbeatResponse = DeviceWireProtocol.ParseHeartbeatResponse(
                     await transport.ReceiveTextAsync(cancellationToken));
+                authorizationUpdated?.Invoke(heartbeatResponse.TestAuthorization);
                 if (heartbeatResponse.Revoked)
                 {
                     return new DeviceConnectionResult(true, heartbeatResponse.Reason);
